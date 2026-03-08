@@ -112,7 +112,6 @@ async function startSocket() {
       const senderId = msg.key.participant || chatId;
       const isGroup = chatId.endsWith('@g.us');
       const senderNumber = senderId.replace(/@.*/, '');
-
       // Handle fromMe messages based on mode
       if (msg.key.fromMe) {
         if (isGroup || chatId.includes('status')) continue;
