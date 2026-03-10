@@ -1454,6 +1454,12 @@ def cmd_cron(args):
     cron_command(args)
 
 
+def cmd_dashboard(args):
+    """Dashboard web UI."""
+    from hermes_cli.dashboard import dashboard_command
+    dashboard_command(args)
+
+
 def cmd_doctor(args):
     """Check configuration and dependencies."""
     from hermes_cli.doctor import run_doctor
@@ -2091,7 +2097,22 @@ For more help on a command:
     cron_subparsers.add_parser("tick", help="Run due jobs once and exit")
     
     cron_parser.set_defaults(func=cmd_cron)
-    
+
+    # =========================================================================
+    # dashboard command
+    # =========================================================================
+    dashboard_parser = subparsers.add_parser(
+        "dashboard",
+        help="Web dashboard for monitoring",
+        description="Start the Hermes monitoring dashboard"
+    )
+    dashboard_parser.add_argument("--port", type=int, default=18799, help="Port to listen on (default: 18799)")
+    dashboard_parser.add_argument("--open", action="store_true", help="Open browser after starting")
+    dashboard_parser.add_argument("--dev", action="store_true", help="Auto-restart on Python file changes")
+    dashboard_subparsers = dashboard_parser.add_subparsers(dest="dashboard_command")
+    dashboard_subparsers.add_parser("status", help="Check if dashboard is running")
+    dashboard_parser.set_defaults(func=cmd_dashboard)
+
     # =========================================================================
     # doctor command
     # =========================================================================

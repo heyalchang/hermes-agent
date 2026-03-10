@@ -3555,15 +3555,62 @@ class AIAgent:
                         if self.verbose_logging:
                             logging.debug(f"Token usage: prompt={usage_dict['prompt_tokens']:,}, completion={usage_dict['completion_tokens']:,}, total={usage_dict['total_tokens']:,}")
                         
-                        # Log cache hit stats when prompt caching is active
-                        if self._use_prompt_caching:
-                            details = getattr(response.usage, 'prompt_tokens_details', None)
-                            cached = getattr(details, 'cached_tokens', 0) or 0 if details else 0
-                            written = getattr(details, 'cache_write_tokens', 0) or 0 if details else 0
+                        # Log cache hit stats — read unconditionally since
+                        # OpenAI returns cached_tokens automatically (no opt-in).
+                        # Responses API uses input_tokens_details; Chat Completions
+                        # uses prompt_tokens_details.
+                        cached = 0
+                        written = 0
+                        details = (
+                            getattr(response.usage, 'input_tokens_details', None)
+                            or getattr(response.usage, 'prompt_tokens_details', None)
+                        )
+                        if details:
+                            cached = getattr(details, 'cached_tokens', 0) or 0
+                            written = getattr(details, 'cache_write_tokens', 0) or 0
+                        if cached or written:
                             prompt = usage_dict["prompt_tokens"]
                             hit_pct = (cached / prompt * 100) if prompt > 0 else 0
                             if not self.quiet_mode:
                                 print(f"{self.log_prefix}   💾 Cache: {cached:,}/{prompt:,} tokens ({hit_pct:.0f}% hit, {written:,} written)")
+
+                        # Extract tool names from the response for logging
+                        _tool_names = []
+                        try:
+                            if self.api_mode == "codex_responses":
+                                for item in (getattr(response, "output", None) or []):
+                                    if getattr(item, "type", None) == "function_call":
+                                        _tool_names.append(getattr(item, "name", "?"))
+                            else:
+                                _tc_list = getattr(
+                                    getattr(response, "choices", [None])[0],
+                                    "message", None
+                                )
+                                for tc in (getattr(_tc_list, "tool_calls", None) or []):
+                                    _tool_names.append(tc.function.name)
+                        except Exception:
+                            pass
+
+                        # Append to token usage log (one JSON line per API call)
+                        try:
+                            import json as _json
+                            _entry = {
+                                "ts": datetime.now().isoformat(),
+                                "session_id": self.session_id,
+                                "model": self.model,
+                                "prompt_tokens": prompt_tokens,
+                                "completion_tokens": completion_tokens,
+                                "cached_tokens": cached,
+                                "cache_write_tokens": written,
+                                "api_call": self.session_api_calls,
+                            }
+                            if _tool_names:
+                                _entry["tools"] = _tool_names
+                            _usage_line = _json.dumps(_entry)
+                            with open(_hermes_home / "token_usage.jsonl", "a") as _tf:
+                                _tf.write(_usage_line + "\n")
+                        except Exception:
+                            pass  # Never break the agent over logging
                     
                     break  # Success, exit retry loop
 

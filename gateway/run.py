@@ -1294,8 +1294,12 @@ class GatewayRunner:
                         session_entry.session_id, entry
                     )
             
-            # Update session
-            self.session_store.update_session(session_entry.session_key)
+            # Update session with token counts from this turn
+            self.session_store.update_session(
+                session_entry.session_key,
+                input_tokens=agent_result.get("input_tokens", 0),
+                output_tokens=agent_result.get("output_tokens", 0),
+            )
             
             return response
             
@@ -2777,8 +2781,10 @@ class GatewayRunner:
                     "api_calls": result.get("api_calls", 0),
                     "tools": tools_holder[0] or [],
                     "history_offset": len(agent_history),
+                    "input_tokens": agent_holder[0].session_prompt_tokens if agent_holder[0] else 0,
+                    "output_tokens": agent_holder[0].session_completion_tokens if agent_holder[0] else 0,
                 }
-            
+
             # Scan tool results for MEDIA:<path> tags that need to be delivered
             # as native audio/file attachments.  The TTS tool embeds MEDIA: tags
             # in its JSON response, but the model's final text reply usually
@@ -2820,6 +2826,8 @@ class GatewayRunner:
                 "api_calls": result_holder[0].get("api_calls", 0) if result_holder[0] else 0,
                 "tools": tools_holder[0] or [],
                 "history_offset": len(agent_history),
+                "input_tokens": agent_holder[0].session_prompt_tokens if agent_holder[0] else 0,
+                "output_tokens": agent_holder[0].session_completion_tokens if agent_holder[0] else 0,
             }
         
         # Start progress message sender if enabled
