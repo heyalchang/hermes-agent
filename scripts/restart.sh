@@ -48,11 +48,8 @@ restart_gateway() {
     sleep 1
   fi
 
-  # Clean stale PID file
-  rm -f ~/.hermes/gateway.pid 2>/dev/null || true
-
   echo -e "${GREEN}Starting gateway...${RESET}"
-  nohup $VENV_PYTHON -m hermes_cli.main gateway run \
+  nohup $VENV_PYTHON -m hermes_cli.main gateway run --replace \
     > ~/.hermes/logs/gateway-stdout.log 2>&1 &
   local pid=$!
   echo -e "${GREEN}Gateway started (PID $pid)${RESET}"
