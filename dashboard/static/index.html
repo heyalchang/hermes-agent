@@ -234,24 +234,30 @@ tr:hover { background: var(--bg-hover); }
 }
 
 /* ── Memory viewer ── */
+.memory-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+@media (max-width: 900px) { .memory-grid { grid-template-columns: 1fr; } }
 .memory-content {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 20px;
-  font-size: 14px;
-  line-height: 1.7;
+  padding: 16px;
+  font-size: 13px;
+  line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 700px;
+  max-height: 400px;
   overflow: auto;
 }
-.memory-section { margin-bottom: 24px; }
+.memory-section { margin-bottom: 0; }
 .memory-section h3 {
-  font-size: 16px;
+  font-size: 14px;
   color: var(--accent);
-  margin-bottom: 12px;
-  padding-bottom: 8px;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -502,6 +508,11 @@ function fmtIsoTime(iso) {
   try { return new Date(iso).toLocaleString(); } catch { return iso; }
 }
 
+function fmtIsoTimeShort(iso) {
+  if (!iso) return '—';
+  try { return new Date(iso).toLocaleTimeString(); } catch { return (iso || '').slice(11, 19); }
+}
+
 function fmtNum(n) {
   if (n == null) return '0';
   return Number(n).toLocaleString();
@@ -743,7 +754,7 @@ async function loadUsage() {
   const tbody = $('#usage-detail tbody');
   tbody.innerHTML = entries.slice(0, 200).map(e => `
     <tr>
-      <td>${esc(e.ts || '—')}</td>
+      <td style="white-space:nowrap">${fmtIsoTime(e.ts)}</td>
       <td style="font-family:var(--mono);font-size:11px">${esc(truncate(e.session_id, 16))}</td>
       <td>${esc(e.model || '—')}</td>
       <td>${fmtNum(e.prompt_tokens)}</td>
@@ -954,7 +965,7 @@ async function loadActivity() {
     const cachedStyle = e.cached_tokens > 0 ? 'color:var(--green);font-weight:600' : '';
     return `
       <tr>
-        <td style="white-space:nowrap;font-size:12px">${esc((e.ts || '').slice(11, 19))}</td>
+        <td style="white-space:nowrap;font-size:12px">${fmtIsoTimeShort(e.ts)}</td>
         <td>${e.api_call || '—'}</td>
         <td style="font-family:var(--mono);font-size:11px">${esc((e.session_id || '').slice(0, 16))}</td>
         <td>${esc(e.model || '—')}</td>
@@ -1047,18 +1058,19 @@ function formatSnippet(s) {
 async function loadMemory() {
   const mem = await api('memory');
   const container = $('#memory-content');
-
-  let html = '';
-  if (mem.memory) {
-    html += `<div class="memory-section"><h3>MEMORY.md</h3><div class="memory-content">${esc(mem.memory)}</div></div>`;
-  }
-  if (mem.user) {
-    html += `<div class="memory-section"><h3>USER.md</h3><div class="memory-content">${esc(mem.user)}</div></div>`;
-  }
-  if (!mem.memory && !mem.user) {
-    html = '<div class="empty">No memory files found</div>';
-  }
-  container.innerHTML = html;
+  const tiles = [
+    { key: 'soul',   label: 'SOUL.md' },
+    { key: 'memory', label: 'MEMORY.md' },
+    { key: 'user',   label: 'USER.md' },
+    { key: 'config', label: 'config.yaml' },
+    { key: 'env',    label: '.env (redacted)' },
+  ];
+  const sections = tiles
+    .filter(t => mem[t.key])
+    .map(t => `<div class="memory-section"><h3>${t.label}</h3><div class="memory-content">${esc(mem[t.key])}</div></div>`);
+  container.innerHTML = sections.length
+    ? `<div class="memory-grid">${sections.join('')}</div>`
+    : '<div class="empty">No files found</div>';
 }
 
 // ═══════════════════════════════════════════════════════════════════

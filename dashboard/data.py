@@ -384,13 +384,36 @@ def get_activity(limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
 
 
 def get_memory() -> Dict[str, Optional[str]]:
-    """Read MEMORY.md and USER.md from ~/.hermes/memories/."""
-    result: Dict[str, Optional[str]] = {"memory": None, "user": None}
-    for key, filename in [("memory", "MEMORY.md"), ("user", "USER.md")]:
-        path = MEMORIES_DIR / filename
+    """Read memory, soul, and config files from ~/.hermes/."""
+    result: Dict[str, Optional[str]] = {}
+    files = [
+        ("memory", MEMORIES_DIR / "MEMORY.md"),
+        ("user", MEMORIES_DIR / "USER.md"),
+        ("soul", HERMES_HOME / "SOUL.md"),
+        ("config", HERMES_HOME / "config.yaml"),
+    ]
+    for key, path in files:
         if path.exists():
             try:
                 result[key] = path.read_text(encoding="utf-8")
             except Exception:
                 pass
+    # .env with secrets redacted
+    env_path = HERMES_HOME / ".env"
+    if env_path.exists():
+        try:
+            lines = env_path.read_text(encoding="utf-8").splitlines()
+            redacted = []
+            for line in lines:
+                if "=" in line and not line.lstrip().startswith("#"):
+                    k, _, v = line.partition("=")
+                    v = v.strip().strip("'\"")
+                    if len(v) > 8:
+                        v = v[:4] + "****" + v[-4:]
+                    redacted.append(f"{k}={v}")
+                else:
+                    redacted.append(line)
+            result["env"] = "\n".join(redacted)
+        except Exception:
+            pass
     return result
