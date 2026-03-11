@@ -2,9 +2,11 @@
 # Restart the gateway and/or dashboard, clearing __pycache__ first.
 #
 # Usage:
-#   scripts/restart.sh            # restart both
-#   scripts/restart.sh gateway    # restart gateway only
-#   scripts/restart.sh dashboard  # restart dashboard only
+#   scripts/restart.sh              # restart gateway + dashboard
+#   scripts/restart.sh gateway      # restart gateway only
+#   scripts/restart.sh dashboard    # restart dashboard only
+#   scripts/restart.sh bridges      # restart WhatsApp bridge only
+#   scripts/restart.sh all          # restart everything including bridges
 #
 # Runs from the project root directory.
 
@@ -17,7 +19,10 @@ GREEN='\033[0;32m'
 DIM='\033[0;90m'
 RESET='\033[0m'
 
-TARGET="${1:-all}"
+TARGET="${1:-core}"
+
+WHATSAPP_BRIDGE_DIR="./scripts/whatsapp-bridge"
+WHATSAPP_SESSION_DIR="$HOME/.hermes/whatsapp/session"
 
 # ── Clear __pycache__ ──────────────────────────────────────────────
 echo -e "${DIM}Clearing __pycache__...${RESET}"
@@ -59,6 +64,27 @@ restart_dashboard() {
   echo -e "${GREEN}Dashboard started (PID $pid) → http://localhost:18799${RESET}"
 }
 
+# ── Bridges ────────────────────────────────────────────────────────
+restart_bridges() {
+  # WhatsApp bridge (Node.js / Baileys)
+  if [ -f "$WHATSAPP_BRIDGE_DIR/bridge.js" ]; then
+    echo -e "${DIM}Stopping WhatsApp bridge...${RESET}"
+    pkill -f "whatsapp-bridge/bridge.js" 2>/dev/null || true
+    sleep 2
+
+    echo -e "${GREEN}Starting WhatsApp bridge...${RESET}"
+    nohup node "$WHATSAPP_BRIDGE_DIR/bridge.js" \
+      --port 3000 \
+      --session "$WHATSAPP_SESSION_DIR" \
+      --mode bot \
+      > ~/.hermes/logs/whatsapp-bridge-stdout.log 2>&1 &
+    local pid=$!
+    echo -e "${GREEN}WhatsApp bridge started (PID $pid) → localhost:3000${RESET}"
+  else
+    echo -e "${DIM}WhatsApp bridge not found, skipping${RESET}"
+  fi
+}
+
 # ── Dispatch ───────────────────────────────────────────────────────
 case "$TARGET" in
   gateway)
@@ -67,12 +93,20 @@ case "$TARGET" in
   dashboard)
     restart_dashboard
     ;;
-  all|both)
+  bridges)
+    restart_bridges
+    ;;
+  core)
     restart_gateway
     restart_dashboard
     ;;
+  all)
+    restart_gateway
+    restart_dashboard
+    restart_bridges
+    ;;
   *)
-    echo "Usage: scripts/restart.sh [gateway|dashboard|all]"
+    echo "Usage: scripts/restart.sh [gateway|dashboard|bridges|core|all]"
     exit 1
     ;;
 esac
