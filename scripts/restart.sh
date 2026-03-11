@@ -24,6 +24,14 @@ TARGET="${1:-core}"
 WHATSAPP_BRIDGE_DIR="./scripts/whatsapp-bridge"
 WHATSAPP_SESSION_DIR="$HOME/.hermes/whatsapp/session"
 
+# Signal bridge (Docker container — signal-cli-rest-api)
+# Uncomment SIGNAL_ENABLED when ready to use
+# SIGNAL_ENABLED=1
+SIGNAL_CONTAINER_NAME="signal-cli-rest-api"
+SIGNAL_IMAGE="bbernhard/signal-cli-rest-api:latest"
+SIGNAL_DATA_DIR="$HOME/.hermes/signal/data"
+SIGNAL_PORT="8080"
+
 # ── Clear __pycache__ ──────────────────────────────────────────────
 echo -e "${DIM}Clearing __pycache__...${RESET}"
 find . -path ./venv -prune -o -path ./node_modules -prune -o \
@@ -82,6 +90,27 @@ restart_bridges() {
     echo -e "${GREEN}WhatsApp bridge started (PID $pid) → localhost:3000${RESET}"
   else
     echo -e "${DIM}WhatsApp bridge not found, skipping${RESET}"
+  fi
+
+  # Signal bridge (Docker — signal-cli-rest-api)
+  if [ "${SIGNAL_ENABLED:-}" = "1" ]; then
+    echo -e "${DIM}Stopping Signal bridge...${RESET}"
+    docker stop "$SIGNAL_CONTAINER_NAME" 2>/dev/null || true
+    docker rm "$SIGNAL_CONTAINER_NAME" 2>/dev/null || true
+    sleep 1
+
+    mkdir -p "$SIGNAL_DATA_DIR"
+
+    echo -e "${GREEN}Starting Signal bridge...${RESET}"
+    docker run -d \
+      --name "$SIGNAL_CONTAINER_NAME" \
+      --restart unless-stopped \
+      -p "${SIGNAL_PORT}:8080" \
+      -v "${SIGNAL_DATA_DIR}:/home/.local/share/signal-cli" \
+      "$SIGNAL_IMAGE"
+    echo -e "${GREEN}Signal bridge started → localhost:${SIGNAL_PORT}${RESET}"
+  else
+    echo -e "${DIM}Signal bridge disabled (set SIGNAL_ENABLED=1 in script to enable)${RESET}"
   fi
 }
 
