@@ -112,6 +112,12 @@ async def handle_memory(request):
     return json_response(data.get_memory())
 
 
+async def handle_insights(request):
+    days = int(request.query.get("days", 30))
+    source = request.query.get("source")
+    return json_response(data.get_insights(days=days, source=source))
+
+
 # =========================================================================
 # App factory
 # =========================================================================
@@ -136,6 +142,7 @@ def create_app() -> web.Application:
     app.router.add_get("/api/feed", handle_feed)
     app.router.add_get("/api/activity", handle_activity)
     app.router.add_get("/api/memory", handle_memory)
+    app.router.add_get("/api/insights", handle_insights)
 
     # Static files
     app.router.add_static("/static/", STATIC_DIR, name="static")

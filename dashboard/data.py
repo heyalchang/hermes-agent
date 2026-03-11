@@ -84,14 +84,16 @@ def get_sessions(
         if source:
             rows = conn.execute(
                 "SELECT id, source, user_id, model, started_at, ended_at, "
-                "message_count, tool_call_count, input_tokens, output_tokens "
+                "message_count, tool_call_count, input_tokens, output_tokens, "
+                "title, end_reason, parent_session_id "
                 "FROM sessions WHERE source = ? ORDER BY started_at DESC LIMIT ? OFFSET ?",
                 (source, limit, offset),
             ).fetchall()
         else:
             rows = conn.execute(
                 "SELECT id, source, user_id, model, started_at, ended_at, "
-                "message_count, tool_call_count, input_tokens, output_tokens "
+                "message_count, tool_call_count, input_tokens, output_tokens, "
+                "title, end_reason, parent_session_id "
                 "FROM sessions ORDER BY started_at DESC LIMIT ? OFFSET ?",
                 (limit, offset),
             ).fetchall()
@@ -220,6 +222,22 @@ def get_usage(days: int = 30, source: Optional[str] = None) -> Dict[str, Any]:
     return result
 
 
+def get_insights(days: int = 30, source: Optional[str] = None) -> Dict[str, Any]:
+    """Generate insights report using InsightsEngine."""
+    if not DB_PATH.exists():
+        return {"empty": True, "days": days}
+    try:
+        from hermes_state import SessionDB
+        from agent.insights import InsightsEngine
+        db = SessionDB()
+        engine = InsightsEngine(db)
+        report = engine.generate(days=days, source=source)
+        db.close()
+        return report
+    except Exception:
+        return {"empty": True, "days": days, "error": "InsightsEngine unavailable"}
+
+
 # =========================================================================
 # Cron jobs
 # =========================================================================
@@ -292,7 +310,7 @@ def search_transcripts(
         where_clauses = ["messages_fts MATCH ?"]
         params: list = [query]
 
-        sources = [source] if source else ["cli", "telegram", "discord", "whatsapp", "slack"]
+        sources = [source] if source else ["cli", "telegram", "discord", "whatsapp", "slack", "signal", "homeassistant", "email"]
         placeholders = ",".join("?" for _ in sources)
         where_clauses.append(f"s.source IN ({placeholders})")
         params.extend(sources)
@@ -340,7 +358,7 @@ def get_feed(
         return []
     conn = _ro_connect()
     try:
-        sources = [source] if source else ["telegram", "whatsapp", "discord", "slack"]
+        sources = [source] if source else ["telegram", "whatsapp", "discord", "slack", "signal", "homeassistant", "email"]
         placeholders = ",".join("?" for _ in sources)
         params: list = list(sources)
         params.extend([limit, offset])

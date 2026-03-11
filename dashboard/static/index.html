@@ -147,6 +147,9 @@ tr:hover { background: var(--bg-hover); }
 .badge-discord { background: #5865f233; color: #8b9cff; }
 .badge-whatsapp { background: #3fb95033; color: #3fb950; }
 .badge-slack { background: #d2992233; color: #d29922; }
+.badge-signal { background: #3a76f033; color: #6b9fff; }
+.badge-homeassistant { background: #41bdf533; color: #41bdf5; }
+.badge-email { background: #bc8cff33; color: #bc8cff; }
 
 /* ── Transcript ── */
 .transcript {
@@ -302,6 +305,36 @@ tr:hover { background: var(--bg-hover); }
 .collapsible-body { display: none; padding: 8px 0 8px 20px; }
 .collapsible.open + .collapsible-body { display: block; }
 
+/* ── Insights ── */
+.insights-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+@media (max-width: 900px) { .insights-grid { grid-template-columns: 1fr; } }
+.insights-section {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+.insights-section h4 {
+  font-size: 13px;
+  color: var(--accent);
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.insights-section table { font-size: 12px; }
+.insights-section th { font-size: 11px; background: transparent; }
+.bar-cell {
+  background: var(--accent-dim);
+  height: 16px;
+  border-radius: 3px;
+  min-width: 2px;
+}
+
 /* ── Loading ── */
 .loading { color: var(--text-dim); padding: 40px; text-align: center; }
 .empty { color: var(--text-dim); padding: 40px; text-align: center; font-style: italic; }
@@ -341,7 +374,7 @@ tr:hover { background: var(--bg-hover); }
     <h3 style="margin-bottom:12px; font-size:15px;">Recent Sessions</h3>
     <div class="table-wrap">
       <table id="overview-sessions">
-        <thead><tr><th>Session</th><th>Source</th><th>Model</th><th>Messages</th><th>Tokens</th><th>Started</th></tr></thead>
+        <thead><tr><th>Session</th><th>Title</th><th>Source</th><th>Model</th><th>Messages</th><th>Tokens</th><th>Started</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
@@ -356,6 +389,9 @@ tr:hover { background: var(--bg-hover); }
         <option value="whatsapp">WhatsApp</option>
         <option value="discord">Discord</option>
         <option value="slack">Slack</option>
+        <option value="signal">Signal</option>
+        <option value="homeassistant">Home Assistant</option>
+        <option value="email">Email</option>
       </select>
       <button onclick="loadFeed()">Refresh</button>
       <label><input type="checkbox" id="feed-auto-refresh"> Auto-refresh (10s)</label>
@@ -398,6 +434,9 @@ tr:hover { background: var(--bg-hover); }
         <option value="discord">Discord</option>
         <option value="whatsapp">WhatsApp</option>
         <option value="slack">Slack</option>
+        <option value="signal">Signal</option>
+        <option value="homeassistant">Home Assistant</option>
+        <option value="email">Email</option>
       </select>
     </div>
     <div class="split">
@@ -428,10 +467,14 @@ tr:hover { background: var(--bg-hover); }
         <option value="discord">Discord</option>
         <option value="whatsapp">WhatsApp</option>
         <option value="slack">Slack</option>
+        <option value="signal">Signal</option>
+        <option value="homeassistant">Home Assistant</option>
+        <option value="email">Email</option>
       </select>
       <button onclick="loadUsage()">Refresh</button>
     </div>
     <div class="cards" id="usage-cards"></div>
+    <div id="insights-panels"></div>
     <h3 style="margin-bottom:12px; font-size:15px;">Per-Call Detail (JSONL)</h3>
     <div class="table-wrap">
       <table id="usage-detail">
@@ -472,6 +515,9 @@ tr:hover { background: var(--bg-hover); }
         <option value="discord">Discord</option>
         <option value="whatsapp">WhatsApp</option>
         <option value="slack">Slack</option>
+        <option value="signal">Signal</option>
+        <option value="homeassistant">Home Assistant</option>
+        <option value="email">Email</option>
       </select>
       <button onclick="doSearch()">Search</button>
     </div>
@@ -623,6 +669,7 @@ async function loadOverview() {
   tbody.innerHTML = sessions.map(s => `
     <tr>
       <td><span style="font-family:var(--mono);font-size:12px">${esc(s.id?.slice(0, 20))}</span></td>
+      <td>${s.title ? esc(truncate(s.title, 20)) : '<span style="color:var(--text-dim)">—</span>'}</td>
       <td>${sourceBadge(s.source)}</td>
       <td>${esc(truncate(s.model, 25))}</td>
       <td>${fmtNum(s.message_count)}</td>
@@ -653,8 +700,10 @@ async function loadSessions() {
   list.innerHTML = sessions.map(s => {
     const selected = s.id === currentSessionId ? ' selected' : '';
     const tokens = (s.input_tokens || 0) + (s.output_tokens || 0);
+    const titleHtml = s.title ? `<div style="font-weight:600;font-size:13px;margin-bottom:2px">${esc(s.title)}</div>` : '';
     return `
       <div class="session-item${selected}" data-id="${esc(s.id)}">
+        ${titleHtml}
         <div class="si-id">${esc(s.id?.slice(0, 24))}</div>
         <div class="si-meta">
           ${sourceBadge(s.source)}
@@ -722,17 +771,45 @@ async function loadSessionDetail(sessionId) {
 // ═══════════════════════════════════════════════════════════════════
 // Usage
 // ═══════════════════════════════════════════════════════════════════
+function fmtCost(n) {
+  if (!n) return '$0.00';
+  return '$' + Number(n).toFixed(2);
+}
+
+function fmtDuration(seconds) {
+  if (!seconds) return '—';
+  if (seconds < 60) return Math.round(seconds) + 's';
+  const m = seconds / 60;
+  if (m < 60) return Math.round(m) + 'm';
+  const h = m / 60;
+  const rm = Math.round(m % 60);
+  return Math.floor(h) + 'h' + (rm ? ' ' + rm + 'm' : '');
+}
+
 async function loadUsage() {
   const days = $('#usage-days').value;
   const source = $('#usage-source').value;
   const params = `?days=${days}` + (source ? `&source=${source}` : '');
-  const usage = await api('tokens' + params);
+  const [usage, insights] = await Promise.all([
+    api('tokens' + params),
+    api('insights' + params),
+  ]);
   const s = usage.summary || {};
+  const o = insights.overview || {};
+
+  // Cards — augmented with insights data
+  const costHtml = o.estimated_cost != null
+    ? `<div class="card"><div class="label">Est. Cost</div><div class="value" style="font-size:22px">${fmtCost(o.estimated_cost)}</div>${o.models_without_pricing?.length ? '<div class="sub">excl. custom models</div>' : ''}</div>`
+    : '';
+  const activeHtml = o.total_hours
+    ? `<div class="card"><div class="label">Active Time</div><div class="value" style="font-size:22px">~${fmtDuration(o.total_hours * 3600)}</div><div class="sub">avg ${fmtDuration(o.avg_session_duration)}/session</div></div>`
+    : '';
 
   $('#usage-cards').innerHTML = `
     <div class="card">
       <div class="label">Sessions</div>
       <div class="value">${fmtNum(s.total_sessions)}</div>
+      <div class="sub">${fmtNum(o.total_messages || 0)} messages</div>
     </div>
     <div class="card">
       <div class="label">Total Tokens</div>
@@ -747,9 +824,84 @@ async function loadUsage() {
     <div class="card">
       <div class="label">API Calls (JSONL)</div>
       <div class="value">${fmtNum(s.jsonl_calls)}</div>
+      <div class="sub">${fmtNum(o.total_tool_calls || 0)} tool calls</div>
     </div>
+    ${costHtml}
+    ${activeHtml}
   `;
 
+  // Insights panels
+  const panels = $('#insights-panels');
+  if (insights.empty) {
+    panels.innerHTML = '';
+  } else {
+    let html = '<div class="insights-grid">';
+
+    // Models breakdown
+    if (insights.models?.length) {
+      html += '<div class="insights-section"><h4>Models</h4><table><thead><tr><th>Model</th><th>Sessions</th><th>Tokens</th><th>Cost</th></tr></thead><tbody>';
+      for (const m of insights.models) {
+        html += `<tr><td>${esc(m.model)}</td><td>${fmtNum(m.sessions)}</td><td>${fmtTokens(m.total_tokens)}</td><td>${m.has_pricing ? fmtCost(m.cost) : 'N/A'}</td></tr>`;
+      }
+      html += '</tbody></table></div>';
+    }
+
+    // Platform breakdown
+    if (insights.platforms?.length > 1 || (insights.platforms?.length === 1 && insights.platforms[0].platform !== 'cli')) {
+      html += '<div class="insights-section"><h4>Platforms</h4><table><thead><tr><th>Platform</th><th>Sessions</th><th>Messages</th><th>Tokens</th></tr></thead><tbody>';
+      for (const p of insights.platforms) {
+        html += `<tr><td>${sourceBadge(p.platform)}</td><td>${fmtNum(p.sessions)}</td><td>${fmtNum(p.messages)}</td><td>${fmtTokens(p.total_tokens)}</td></tr>`;
+      }
+      html += '</tbody></table></div>';
+    }
+
+    // Tool usage (top 15)
+    if (insights.tools?.length) {
+      html += '<div class="insights-section"><h4>Top Tools</h4><table><thead><tr><th>Tool</th><th>Calls</th><th>%</th></tr></thead><tbody>';
+      const maxCount = insights.tools[0]?.count || 1;
+      for (const t of insights.tools.slice(0, 15)) {
+        const barW = Math.max(2, Math.round(t.count / maxCount * 60));
+        html += `<tr><td>${esc(t.tool)}</td><td>${fmtNum(t.count)}<div class="bar-cell" style="width:${barW}px;margin-top:2px"></div></td><td>${t.percentage.toFixed(1)}%</td></tr>`;
+      }
+      html += '</tbody></table></div>';
+    }
+
+    // Activity patterns
+    const act = insights.activity || {};
+    if (act.by_day?.length) {
+      const maxDay = Math.max(...act.by_day.map(d => d.count)) || 1;
+      html += '<div class="insights-section"><h4>Activity</h4>';
+      html += '<div style="display:flex;gap:6px;align-items:flex-end;height:80px;margin-bottom:12px">';
+      for (const d of act.by_day) {
+        const h = Math.max(4, Math.round(d.count / maxDay * 70));
+        html += `<div style="flex:1;text-align:center"><div class="bar-cell" style="width:100%;height:${h}px"></div><div style="font-size:10px;color:var(--text-dim);margin-top:4px">${d.day}</div></div>`;
+      }
+      html += '</div>';
+      if (act.busiest_hour) {
+        const hr = act.busiest_hour.hour;
+        const ampm = hr < 12 ? 'AM' : 'PM';
+        const dhr = hr % 12 || 12;
+        html += `<div style="font-size:12px;color:var(--text-dim)">Peak hour: ${dhr}${ampm} (${act.busiest_hour.count} sessions)</div>`;
+      }
+      if (act.active_days) html += `<div style="font-size:12px;color:var(--text-dim)">Active days: ${act.active_days}</div>`;
+      if (act.max_streak > 1) html += `<div style="font-size:12px;color:var(--text-dim)">Best streak: ${act.max_streak} consecutive days</div>`;
+      html += '</div>';
+    }
+
+    // Notable sessions
+    if (insights.top_sessions?.length) {
+      html += '<div class="insights-section"><h4>Notable Sessions</h4><table><thead><tr><th>Metric</th><th>Value</th><th>Date</th></tr></thead><tbody>';
+      for (const ts of insights.top_sessions) {
+        html += `<tr><td>${esc(ts.label)}</td><td>${esc(ts.value)}</td><td>${esc(ts.date)}</td></tr>`;
+      }
+      html += '</tbody></table></div>';
+    }
+
+    html += '</div>';
+    panels.innerHTML = html;
+  }
+
+  // JSONL detail table (unchanged)
   const entries = usage.jsonl_entries || [];
   const tbody = $('#usage-detail tbody');
   tbody.innerHTML = entries.slice(0, 200).map(e => `
