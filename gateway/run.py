@@ -1434,12 +1434,13 @@ class GatewayRunner:
                         skip_db=agent_persisted,
                     )
             
-            # Update session with token counts from this turn
+            # Update session with token counts and model from this turn
             self.session_store.update_session(
                 session_entry.session_key,
                 input_tokens=agent_result.get("input_tokens", 0),
                 output_tokens=agent_result.get("output_tokens", 0),
                 last_prompt_tokens=agent_result.get("last_prompt_tokens", 0),
+                model=agent_result.get("model"),
             )
             
             return response
@@ -3238,6 +3239,7 @@ class GatewayRunner:
                     "input_tokens": agent_holder[0].session_prompt_tokens if agent_holder[0] else 0,
                     "output_tokens": agent_holder[0].session_completion_tokens if agent_holder[0] else 0,
                     "last_prompt_tokens": _last_prompt_toks,
+                    "model": agent_holder[0].model if agent_holder[0] else None,
                 }
 
             # Scan tool results for MEDIA:<path> tags that need to be delivered
@@ -3284,6 +3286,7 @@ class GatewayRunner:
                 "input_tokens": agent_holder[0].session_prompt_tokens if agent_holder[0] else 0,
                 "output_tokens": agent_holder[0].session_completion_tokens if agent_holder[0] else 0,
                 "last_prompt_tokens": _last_prompt_toks,
+                "model": agent_holder[0].model if agent_holder[0] else None,
             }
         
         # Start progress message sender if enabled
