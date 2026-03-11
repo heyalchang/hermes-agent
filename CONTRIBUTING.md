@@ -139,7 +139,8 @@ hermes-agent/
 │   ├── commands.py               # Slash command definitions + autocomplete
 │   ├── callbacks.py              # Interactive callbacks (clarify, sudo, approval)
 │   ├── doctor.py                 # Diagnostics
-│   └── skills_hub.py             # Skills Hub CLI + /skills slash command
+│   ├── skills_hub.py             # Skills Hub CLI + /skills slash command
+│   └── skin_engine.py            # Skin/theme engine — data-driven CLI visual customization
 │
 ├── tools/                    # Tool implementations (self-registering)
 │   ├── registry.py               # Central tool registry (schemas, handlers, dispatch)
@@ -332,6 +333,8 @@ metadata:
   hermes:
     tags: [Category, Subcategory, Keywords]
     related_skills: [other-skill-name]
+    fallback_for_toolsets: [web]       # Optional — show only when toolset is unavailable
+    requires_toolsets: [terminal]      # Optional — show only when toolset is available
 ---
 
 # Skill Title
@@ -366,12 +369,104 @@ platforms: [windows]          # Windows only
 
 If the field is omitted or empty, the skill loads on all platforms (backward compatible). See `skills/apple/` for examples of macOS-only skills.
 
+### Conditional skill activation
+
+Skills can declare conditions that control when they appear in the system prompt, based on which tools and toolsets are available in the current session. This is primarily used for **fallback skills** — alternatives that should only be shown when a primary tool is unavailable.
+
+Four fields are supported under `metadata.hermes`:
+
+```yaml
+metadata:
+  hermes:
+    fallback_for_toolsets: [web]      # Show ONLY when these toolsets are unavailable
+    requires_toolsets: [terminal]     # Show ONLY when these toolsets are available
+    fallback_for_tools: [web_search]  # Show ONLY when these specific tools are unavailable
+    requires_tools: [terminal]        # Show ONLY when these specific tools are available
+```
+
+**Semantics:**
+- `fallback_for_*`: The skill is a backup. It is **hidden** when the listed tools/toolsets are available, and **shown** when they are unavailable. Use this for free alternatives to premium tools.
+- `requires_*`: The skill needs certain tools to function. It is **hidden** when the listed tools/toolsets are unavailable. Use this for skills that depend on specific capabilities (e.g., a skill that only makes sense with terminal access).
+- If both are specified, both conditions must be satisfied for the skill to appear.
+- If neither is specified, the skill is always shown (backward compatible).
+
+**Examples:**
+
+```yaml
+# DuckDuckGo search — shown when Firecrawl (web toolset) is unavailable
+metadata:
+  hermes:
+    fallback_for_toolsets: [web]
+
+# Smart home skill — only useful when terminal is available
+metadata:
+  hermes:
+    requires_toolsets: [terminal]
+
+# Local browser fallback — shown when Browserbase is unavailable
+metadata:
+  hermes:
+    fallback_for_toolsets: [browser]
+```
+
+The filtering happens at prompt build time in `agent/prompt_builder.py`. The `build_skills_system_prompt()` function receives the set of available tools and toolsets from the agent and uses `_skill_should_show()` to evaluate each skill's conditions.
+
 ### Skill guidelines
 
 - **No external dependencies unless absolutely necessary.** Prefer stdlib Python, curl, and existing Hermes tools (`web_extract`, `terminal`, `read_file`).
 - **Progressive disclosure.** Put the most common workflow first. Edge cases and advanced usage go at the bottom.
 - **Include helper scripts** for XML/JSON parsing or complex logic — don't expect the LLM to write parsers inline every time.
 - **Test it.** Run `hermes --toolsets skills -q "Use the X skill to do Y"` and verify the agent follows the instructions correctly.
+
+---
+
+## Adding a Skin / Theme
+
+Hermes uses a data-driven skin system — no code changes needed to add a new skin.
+
+**Option A: User skin (YAML file)**
+
+Create `~/.hermes/skins/<name>.yaml`:
+
+```yaml
+name: mytheme
+description: Short description of the theme
+
+colors:
+  banner_border: "#HEX"     # Panel border color
+  banner_title: "#HEX"      # Panel title color
+  banner_accent: "#HEX"     # Section header color
+  banner_dim: "#HEX"        # Muted/dim text color
+  banner_text: "#HEX"       # Body text color
+  response_border: "#HEX"   # Response box border
+
+spinner:
+  waiting_faces: ["(⚔)", "(⛨)"]
+  thinking_faces: ["(⚔)", "(⌁)"]
+  thinking_verbs: ["forging", "plotting"]
+  wings:                     # Optional left/right decorations
+    - ["⟪⚔", "⚔⟫"]
+
+branding:
+  agent_name: "My Agent"
+  welcome: "Welcome message"
+  response_label: " ⚔ Agent "
+  prompt_symbol: "⚔ ❯ "
+
+tool_prefix: "╎"             # Tool output line prefix
+```
+
+All fields are optional — missing values inherit from the default skin.
+
+**Option B: Built-in skin**
+
+Add to `_BUILTIN_SKINS` dict in `hermes_cli/skin_engine.py`. Use the same schema as above but as a Python dict. Built-in skins ship with the package and are always available.
+
+**Activating:**
+- CLI: `/skin mytheme` or set `display.skin: mytheme` in config.yaml
+- Config: `display: { skin: mytheme }`
+
+See `hermes_cli/skin_engine.py` for the full schema and existing skins as examples.
 
 ---
 

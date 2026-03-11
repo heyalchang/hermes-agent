@@ -477,6 +477,10 @@ def cmd_chat(args):
     except Exception:
         pass
 
+    # --yolo: bypass all dangerous command approvals
+    if getattr(args, "yolo", False):
+        os.environ["HERMES_YOLO_MODE"] = "1"
+
     # Import and run the CLI
     from cli import main as cli_main
     
@@ -486,9 +490,11 @@ def cmd_chat(args):
         "provider": getattr(args, "provider", None),
         "toolsets": args.toolsets,
         "verbose": args.verbose,
+        "quiet": getattr(args, "quiet", False),
         "query": args.query,
         "resume": getattr(args, "resume", None),
         "worktree": getattr(args, "worktree", False),
+        "checkpoints": getattr(args, "checkpoints", False),
     }
     # Filter out None values
     kwargs = {k: v for k, v in kwargs.items() if v is not None}
@@ -905,9 +911,11 @@ def _model_flow_openrouter(config, current_model=""):
         from hermes_cli.config import load_config, save_config
         cfg = load_config()
         model = cfg.get("model")
-        if isinstance(model, dict):
-            model["provider"] = "openrouter"
-            model["base_url"] = OPENROUTER_BASE_URL
+        if not isinstance(model, dict):
+            model = {"default": model} if model else {}
+            cfg["model"] = model
+        model["provider"] = "openrouter"
+        model["base_url"] = OPENROUTER_BASE_URL
         save_config(cfg)
         deactivate_provider()
         print(f"Default model set to: {selected} (via OpenRouter)")
@@ -1089,9 +1097,11 @@ def _model_flow_custom(config):
         # Update config and deactivate any OAuth provider
         cfg = load_config()
         model = cfg.get("model")
-        if isinstance(model, dict):
-            model["provider"] = "custom"
-            model["base_url"] = effective_url
+        if not isinstance(model, dict):
+            model = {"default": model} if model else {}
+            cfg["model"] = model
+        model["provider"] = "custom"
+        model["base_url"] = effective_url
         save_config(cfg)
         deactivate_provider()
 
@@ -1234,9 +1244,11 @@ def _model_flow_named_custom(config, provider_info):
 
         cfg = load_config()
         model = cfg.get("model")
-        if isinstance(model, dict):
-            model["provider"] = "custom"
-            model["base_url"] = base_url
+        if not isinstance(model, dict):
+            model = {"default": model} if model else {}
+            cfg["model"] = model
+        model["provider"] = "custom"
+        model["base_url"] = base_url
         save_config(cfg)
         deactivate_provider()
 
@@ -1306,9 +1318,11 @@ def _model_flow_named_custom(config, provider_info):
 
     cfg = load_config()
     model = cfg.get("model")
-    if isinstance(model, dict):
-        model["provider"] = "custom"
-        model["base_url"] = base_url
+    if not isinstance(model, dict):
+        model = {"default": model} if model else {}
+        cfg["model"] = model
+    model["provider"] = "custom"
+    model["base_url"] = base_url
     save_config(cfg)
     deactivate_provider()
 
@@ -1419,9 +1433,11 @@ def _model_flow_api_key_provider(config, provider_id, current_model=""):
         # Update config with provider and base URL
         cfg = load_config()
         model = cfg.get("model")
-        if isinstance(model, dict):
-            model["provider"] = provider_id
-            model["base_url"] = effective_base
+        if not isinstance(model, dict):
+            model = {"default": model} if model else {}
+            cfg["model"] = model
+        model["provider"] = provider_id
+        model["base_url"] = effective_base
         save_config(cfg)
         deactivate_provider()
 
@@ -1783,6 +1799,44 @@ def cmd_update(args):
             sys.exit(1)
 
 
+def _coalesce_session_name_args(argv: list) -> list:
+    """Join unquoted multi-word session names after -c/--continue and -r/--resume.
+
+    When a user types ``hermes -c Pokemon Agent Dev`` without quoting the
+    session name, argparse sees three separate tokens.  This function merges
+    them into a single argument so argparse receives
+    ``['-c', 'Pokemon Agent Dev']`` instead.
+
+    Tokens are collected after the flag until we hit another flag (``-*``)
+    or a known top-level subcommand.
+    """
+    _SUBCOMMANDS = {
+        "chat", "model", "gateway", "setup", "whatsapp", "login", "logout",
+        "status", "cron", "doctor", "config", "pairing", "skills", "tools",
+        "sessions", "insights", "version", "update", "uninstall",
+    }
+    _SESSION_FLAGS = {"-c", "--continue", "-r", "--resume"}
+
+    result = []
+    i = 0
+    while i < len(argv):
+        token = argv[i]
+        if token in _SESSION_FLAGS:
+            result.append(token)
+            i += 1
+            # Collect subsequent non-flag, non-subcommand tokens as one name
+            parts: list = []
+            while i < len(argv) and not argv[i].startswith("-") and argv[i] not in _SUBCOMMANDS:
+                parts.append(argv[i])
+                i += 1
+            if parts:
+                result.append(" ".join(parts))
+        else:
+            result.append(token)
+            i += 1
+    return result
+
+
 def main():
     """Main entry point for hermes CLI."""
     parser = argparse.ArgumentParser(
@@ -1841,6 +1895,12 @@ For more help on a command:
         default=False,
         help="Run in an isolated git worktree (for parallel agents)"
     )
+    parser.add_argument(
+        "--yolo",
+        action="store_true",
+        default=False,
+        help="Bypass all dangerous command approval prompts (use at your own risk)"
+    )
     
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
     
@@ -1876,6 +1936,11 @@ For more help on a command:
         help="Verbose output"
     )
     chat_parser.add_argument(
+        "-Q", "--quiet",
+        action="store_true",
+        help="Quiet mode for programmatic use: suppress banner, spinner, and tool previews. Only output the final response and session info."
+    )
+    chat_parser.add_argument(
         "--resume", "-r",
         metavar="SESSION_ID",
         help="Resume a previous session by ID (shown on exit)"
@@ -1894,6 +1959,18 @@ For more help on a command:
         action="store_true",
         default=False,
         help="Run in an isolated git worktree (for parallel agents on the same repo)"
+    )
+    chat_parser.add_argument(
+        "--checkpoints",
+        action="store_true",
+        default=False,
+        help="Enable filesystem checkpoints before destructive file operations (use /rollback to restore)"
+    )
+    chat_parser.add_argument(
+        "--yolo",
+        action="store_true",
+        default=False,
+        help="Bypass all dangerous command approval prompts (use at your own risk)"
     )
     chat_parser.set_defaults(func=cmd_chat)
 
@@ -2196,8 +2273,8 @@ For more help on a command:
     # =========================================================================
     skills_parser = subparsers.add_parser(
         "skills",
-        help="Skills Hub — search, install, and manage skills from online registries",
-        description="Search, install, inspect, audit, and manage skills from GitHub, ClawHub, and other registries."
+        help="Search, install, configure, and manage skills",
+        description="Search, install, inspect, audit, configure, and manage skills from GitHub, ClawHub, and other registries."
     )
     skills_subparsers = skills_parser.add_subparsers(dest="skills_action")
 
@@ -2251,9 +2328,17 @@ For more help on a command:
     tap_rm = tap_subparsers.add_parser("remove", help="Remove a tap")
     tap_rm.add_argument("name", help="Tap name to remove")
 
+    # config sub-action: interactive enable/disable
+    skills_subparsers.add_parser("config", help="Interactive skill configuration — enable/disable individual skills")
+
     def cmd_skills(args):
-        from hermes_cli.skills_hub import skills_command
-        skills_command(args)
+        # Route 'config' action to skills_config module
+        if getattr(args, 'skills_action', None) == 'config':
+            from hermes_cli.skills_config import skills_command as skills_config_command
+            skills_config_command(args)
+        else:
+            from hermes_cli.skills_hub import skills_command
+            skills_command(args)
 
     skills_parser.set_defaults(func=cmd_skills)
 
@@ -2265,13 +2350,17 @@ For more help on a command:
         help="Configure which tools are enabled per platform",
         description="Interactive tool configuration — enable/disable tools for CLI, Telegram, Discord, etc."
     )
+    tools_parser.add_argument(
+        "--summary",
+        action="store_true",
+        help="Print a summary of enabled tools per platform and exit"
+    )
 
     def cmd_tools(args):
         from hermes_cli.tools_config import tools_command
         tools_command(args)
 
     tools_parser.set_defaults(func=cmd_tools)
-
     # =========================================================================
     # sessions command
     # =========================================================================
@@ -2377,12 +2466,12 @@ For more help on a command:
                 if not data:
                     print(f"Session '{args.session_id}' not found.")
                     return
-                with open(args.output, "w") as f:
+                with open(args.output, "w", encoding="utf-8") as f:
                     f.write(_json.dumps(data, ensure_ascii=False) + "\n")
                 print(f"Exported 1 session to {args.output}")
             else:
                 sessions = db.export_all(source=args.source)
-                with open(args.output, "w") as f:
+                with open(args.output, "w", encoding="utf-8") as f:
                     for s in sessions:
                         f.write(_json.dumps(s, ensure_ascii=False) + "\n")
                 print(f"Exported {len(sessions)} sessions to {args.output}")
@@ -2536,7 +2625,11 @@ For more help on a command:
     # =========================================================================
     # Parse and execute
     # =========================================================================
-    args = parser.parse_args()
+    # Pre-process argv so unquoted multi-word session names after -c / -r
+    # are merged into a single token before argparse sees them.
+    # e.g. ``hermes -c Pokemon Agent Dev`` → ``hermes -c 'Pokemon Agent Dev'``
+    _processed_argv = _coalesce_session_name_args(sys.argv[1:])
+    args = parser.parse_args(_processed_argv)
     
     # Handle --version flag
     if args.version:
