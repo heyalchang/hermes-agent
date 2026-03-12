@@ -26,7 +26,7 @@ Visualize what goes into each API payload: system prompt, tool definitions, user
 - Version display (v0.2.0) added to topbar
 
 ### Design decisions
-- tiktoken for exact counts (not the rough estimator in `model_metadata.py`)
+- tiktoken for estimated counts based on JSON serialization (more accurate than the rough estimator in `model_metadata.py`, but not exact chat-ml counts)
 - Extend existing JSONL rather than new file or DB table (old entries without breakdown handled gracefully)
 - Instrument only main agent loop, not side tasks (memory flush, compression)
 - `message_extras` extension table planned for reasoning content (avoids upstream schema conflicts on merge)

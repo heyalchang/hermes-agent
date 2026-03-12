@@ -686,7 +686,9 @@ class AIAgent:
         self.session_completion_tokens = 0
         self.session_total_tokens = 0
         self.session_api_calls = 0
-        
+        self._last_payload_breakdown = {}
+        self._tiktoken_enc = None
+
         if not self.quiet_mode:
             if compression_enabled:
                 print(f"📊 Context limit: {self.context_compressor.context_length:,} tokens (compress at {int(compression_threshold*100)}% = {self.context_compressor.threshold_tokens:,})")
@@ -2438,28 +2440,32 @@ class AIAgent:
         return api_kwargs
 
     def _compute_payload_breakdown(self, api_kwargs: dict) -> dict:
-        """Count tokens per payload component using tiktoken.
+        """Estimate tokens per payload component using tiktoken.
 
         Returns a dict like {"system": N, "tool_defs": N, "user": N,
         "assistant": N, "tool_results": N} where each value is the
-        token count for that component of the outgoing API payload.
+        estimated token count for that component. These are approximations
+        based on JSON serialization, not exact chat-ml token counts.
         """
-        try:
-            import tiktoken
-        except ImportError:
-            return {}
+        if self._tiktoken_enc is None:
+            try:
+                import tiktoken
+            except ImportError:
+                logger.debug("tiktoken not installed; payload breakdown disabled")
+                return {}
+            try:
+                self._tiktoken_enc = tiktoken.encoding_for_model("gpt-4o")
+            except Exception:
+                self._tiktoken_enc = tiktoken.get_encoding("cl100k_base")
 
-        try:
-            enc = tiktoken.encoding_for_model("gpt-4o")
-        except Exception:
-            enc = tiktoken.get_encoding("cl100k_base")
+        enc = self._tiktoken_enc
 
         def _count(obj):
             if obj is None:
                 return 0
             if isinstance(obj, str):
                 return len(enc.encode(obj))
-            return len(enc.encode(json.dumps(obj, default=str)))
+            return len(enc.encode(json.dumps(obj, default=str, ensure_ascii=False)))
 
         breakdown = {}
 
@@ -2467,26 +2473,30 @@ class AIAgent:
             # Codex Responses: instructions, input, tools
             breakdown["system"] = _count(api_kwargs.get("instructions"))
             breakdown["tool_defs"] = _count(api_kwargs.get("tools"))
-            # input is already serialized messages list
             user_tokens = 0
             assistant_tokens = 0
             tool_results_tokens = 0
             for item in (api_kwargs.get("input") or []):
-                if isinstance(item, dict):
-                    role = item.get("role", "")
-                elif isinstance(item, str):
+                if isinstance(item, str):
                     user_tokens += _count(item)
                     continue
-                else:
-                    role = getattr(item, "role", "")
-                if role == "user":
-                    user_tokens += _count(item)
-                elif role == "assistant":
+                # Codex input items use "type" for function_call /
+                # function_call_output, and "role" for regular messages.
+                item_type = item.get("type", "") if isinstance(item, dict) else getattr(item, "type", "")
+                if item_type == "function_call":
                     assistant_tokens += _count(item)
-                elif role in ("tool", "function"):
+                elif item_type == "function_call_output":
                     tool_results_tokens += _count(item)
                 else:
-                    user_tokens += _count(item)
+                    role = item.get("role", "") if isinstance(item, dict) else getattr(item, "role", "")
+                    if role == "user":
+                        user_tokens += _count(item)
+                    elif role == "assistant":
+                        assistant_tokens += _count(item)
+                    elif role in ("tool", "function"):
+                        tool_results_tokens += _count(item)
+                    else:
+                        user_tokens += _count(item)
             breakdown["user"] = user_tokens
             breakdown["assistant"] = assistant_tokens
             breakdown["tool_results"] = tool_results_tokens

@@ -364,35 +364,6 @@ tr:hover { background: var(--bg-hover); }
 .stacked-detail .seg-value { width: 80px; text-align: right; font-family: var(--mono); font-size: 12px; }
 .stacked-detail .seg-pct { width: 50px; text-align: right; font-family: var(--mono); font-size: 11px; color: var(--text-dim); }
 
-/* ── Reasoning chevron in transcript ── */
-.msg-reasoning-toggle {
-  cursor: pointer;
-  font-size: 11px;
-  color: var(--purple);
-  margin-top: 6px;
-  user-select: none;
-}
-.msg-reasoning-toggle::before {
-  content: '\25B6';
-  display: inline-block;
-  margin-right: 4px;
-  font-size: 9px;
-  transition: transform 0.2s;
-}
-.msg-reasoning-toggle.open::before { transform: rotate(90deg); }
-.msg-reasoning-body {
-  display: none;
-  margin-top: 6px;
-  padding: 8px 12px;
-  background: #2a1f3a;
-  border-radius: 6px;
-  font-size: 12px;
-  color: var(--text-dim);
-  line-height: 1.5;
-  white-space: pre-wrap;
-}
-.msg-reasoning-toggle.open + .msg-reasoning-body { display: block; }
-
 /* ── Loading ── */
 .loading { color: var(--text-dim); padding: 40px; text-align: center; }
 .empty { color: var(--text-dim); padding: 40px; text-align: center; font-style: italic; }
