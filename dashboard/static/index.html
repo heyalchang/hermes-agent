@@ -335,6 +335,64 @@ tr:hover { background: var(--bg-hover); }
   min-width: 2px;
 }
 
+/* ── Payload viz ── */
+.payload-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.payload-bar-row:hover { opacity: 0.85; }
+.payload-bar-row .bar-label { width: 60px; text-align: right; color: var(--text-dim); flex-shrink: 0; }
+.payload-bar-row .bar-track { flex: 1; height: 22px; display: flex; border-radius: 3px; overflow: hidden; }
+.payload-bar-row .bar-segment { height: 100%; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #fff; min-width: 0; }
+.payload-bar-row .bar-value { width: 70px; font-family: var(--mono); font-size: 11px; text-align: right; flex-shrink: 0; }
+
+.stacked-detail {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-top: 12px;
+}
+.stacked-detail .seg-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 13px; }
+.stacked-detail .seg-color { width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0; }
+.stacked-detail .seg-label { width: 100px; color: var(--text-dim); }
+.stacked-detail .seg-bar { flex: 1; height: 18px; border-radius: 3px; }
+.stacked-detail .seg-value { width: 80px; text-align: right; font-family: var(--mono); font-size: 12px; }
+.stacked-detail .seg-pct { width: 50px; text-align: right; font-family: var(--mono); font-size: 11px; color: var(--text-dim); }
+
+/* ── Reasoning chevron in transcript ── */
+.msg-reasoning-toggle {
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--purple);
+  margin-top: 6px;
+  user-select: none;
+}
+.msg-reasoning-toggle::before {
+  content: '\25B6';
+  display: inline-block;
+  margin-right: 4px;
+  font-size: 9px;
+  transition: transform 0.2s;
+}
+.msg-reasoning-toggle.open::before { transform: rotate(90deg); }
+.msg-reasoning-body {
+  display: none;
+  margin-top: 6px;
+  padding: 8px 12px;
+  background: #2a1f3a;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.msg-reasoning-toggle.open + .msg-reasoning-body { display: block; }
+
 /* ── Loading ── */
 .loading { color: var(--text-dim); padding: 40px; text-align: center; }
 .empty { color: var(--text-dim); padding: 40px; text-align: center; font-style: italic; }
@@ -351,6 +409,7 @@ tr:hover { background: var(--bg-hover); }
 
 <div class="topbar">
   <h1>Hermes Dashboard</h1>
+  <span style="font-size:12px;color:var(--text-dim);margin-left:-8px">v0.2.0</span>
   <span id="gateway-status"></span>
 </div>
 
@@ -360,6 +419,7 @@ tr:hover { background: var(--bg-hover); }
   <button data-tab="activity">Activity</button>
   <button data-tab="sessions">Sessions</button>
   <button data-tab="usage">Usage</button>
+  <button data-tab="payload">Payload</button>
   <button data-tab="cron">Cron Jobs</button>
   <button data-tab="logs">Logs</button>
   <button data-tab="search">Search</button>
@@ -486,6 +546,26 @@ tr:hover { background: var(--bg-hover); }
     </div>
   </div>
 
+  <!-- ═══ Payload Breakdown ═══ -->
+  <div class="tab-panel" id="panel-payload">
+    <div class="toolbar">
+      <select id="payload-session" style="min-width:320px">
+        <option value="">Select a session...</option>
+      </select>
+      <button onclick="loadPayload()">Load</button>
+    </div>
+    <div id="payload-area-wrap" style="display:none">
+      <h3 style="margin-bottom:12px;font-size:15px">Context Growth Over Session</h3>
+      <canvas id="payload-area-chart" width="900" height="360" style="width:100%;max-width:900px;background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius)"></canvas>
+      <div id="payload-legend" style="display:flex;gap:16px;margin:8px 0 24px;font-size:12px;flex-wrap:wrap"></div>
+    </div>
+    <div id="payload-bar-wrap" style="display:none">
+      <h3 style="margin-bottom:12px;font-size:15px">Per-Turn Breakdown <span id="payload-bar-title" style="color:var(--text-dim);font-weight:normal"></span></h3>
+      <div id="payload-bar-detail"></div>
+    </div>
+    <div id="payload-empty" class="empty">Select a session with payload data to visualize</div>
+  </div>
+
   <!-- ═══ Cron Jobs ═══ -->
   <div class="tab-panel" id="panel-cron">
     <div class="table-wrap">
@@ -604,6 +684,7 @@ const tabHandlers = {
   activity: loadActivity,
   sessions: loadSessions,
   usage: loadUsage,
+  payload: loadPayloadTab,
   cron: loadCron,
   logs: loadLogs,
   search: () => {},
@@ -1225,6 +1306,255 @@ async function loadMemory() {
   container.innerHTML = sections.length
     ? `<div class="memory-grid">${sections.join('')}</div>`
     : '<div class="empty">No files found</div>';
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Payload Breakdown
+// ═══════════════════════════════════════════════════════════════════
+const PAYLOAD_COLORS = {
+  system:       '#58a6ff',  // blue
+  tool_defs:    '#bc8cff',  // purple
+  user:         '#3fb950',  // green
+  assistant:    '#d29922',  // orange
+  tool_results: '#f85149',  // red
+};
+const PAYLOAD_LABELS = {
+  system: 'System',
+  tool_defs: 'Tool Defs',
+  user: 'User',
+  assistant: 'Assistant',
+  tool_results: 'Tool Results',
+};
+const PAYLOAD_KEYS = ['system', 'tool_defs', 'user', 'assistant', 'tool_results'];
+
+async function loadPayloadTab() {
+  // Populate session dropdown with recent sessions
+  const sessions = await api('sessions?limit=50');
+  const sel = $('#payload-session');
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">Select a session...</option>';
+  for (const s of sessions) {
+    const label = (s.title ? truncate(s.title, 40) + ' — ' : '') +
+      truncate(s.id, 16) + ' (' + (s.source || '?') + ', ' + fmtTime(s.started_at) + ')';
+    sel.innerHTML += `<option value="${esc(s.id)}">${esc(label)}</option>`;
+  }
+  if (prev) sel.value = prev;
+}
+
+async function loadPayload() {
+  const sessionId = $('#payload-session').value;
+  if (!sessionId) return;
+
+  const data = await api('payload-breakdown?session_id=' + encodeURIComponent(sessionId));
+
+  if (!data.length) {
+    $('#payload-area-wrap').style.display = 'none';
+    $('#payload-bar-wrap').style.display = 'none';
+    $('#payload-empty').style.display = '';
+    $('#payload-empty').textContent = 'No payload breakdown data for this session (pre-instrumentation data)';
+    return;
+  }
+
+  $('#payload-empty').style.display = 'none';
+  $('#payload-area-wrap').style.display = '';
+  $('#payload-bar-wrap').style.display = '';
+
+  drawPayloadAreaChart(data);
+  drawPayloadBars(data);
+}
+
+function drawPayloadAreaChart(data) {
+  const canvas = $('#payload-area-chart');
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.clientWidth;
+  const H = canvas.clientHeight;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  ctx.scale(dpr, dpr);
+
+  const pad = { top: 20, right: 20, bottom: 40, left: 65 };
+  const plotW = W - pad.left - pad.right;
+  const plotH = H - pad.top - pad.bottom;
+
+  // Compute stacked totals per turn
+  const turns = data.map(d => {
+    const b = d.breakdown || {};
+    let cumulative = 0;
+    const stacked = {};
+    for (const k of PAYLOAD_KEYS) {
+      cumulative += b[k] || 0;
+      stacked[k] = cumulative;
+    }
+    return { ...d, stacked, total: cumulative };
+  });
+
+  const maxY = Math.max(...turns.map(t => t.total), 1);
+  const n = turns.length;
+
+  // Clear
+  ctx.clearRect(0, 0, W, H);
+
+  // X/Y scale
+  const xScale = i => pad.left + (n > 1 ? (i / (n - 1)) * plotW : plotW / 2);
+  const yScale = v => pad.top + plotH - (v / maxY) * plotH;
+
+  // Draw stacked areas (bottom to top)
+  for (let ki = PAYLOAD_KEYS.length - 1; ki >= 0; ki--) {
+    const key = PAYLOAD_KEYS[ki];
+    ctx.beginPath();
+    ctx.moveTo(xScale(0), yScale(0));
+    for (let i = 0; i < n; i++) {
+      ctx.lineTo(xScale(i), yScale(turns[i].stacked[key]));
+    }
+    ctx.lineTo(xScale(n - 1), yScale(0));
+    ctx.closePath();
+    ctx.fillStyle = PAYLOAD_COLORS[key] + '99';
+    ctx.fill();
+  }
+
+  // Draw cached overlay line
+  ctx.beginPath();
+  ctx.strokeStyle = '#ffffff88';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([5, 3]);
+  for (let i = 0; i < n; i++) {
+    const y = yScale(turns[i].cached_tokens || 0);
+    i === 0 ? ctx.moveTo(xScale(i), y) : ctx.lineTo(xScale(i), y);
+  }
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Axes
+  ctx.strokeStyle = '#30363d';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(pad.left, pad.top);
+  ctx.lineTo(pad.left, pad.top + plotH);
+  ctx.lineTo(pad.left + plotW, pad.top + plotH);
+  ctx.stroke();
+
+  // Y-axis labels
+  ctx.fillStyle = '#8b949e';
+  ctx.font = '11px -apple-system, sans-serif';
+  ctx.textAlign = 'right';
+  const yTicks = 5;
+  for (let i = 0; i <= yTicks; i++) {
+    const v = (maxY / yTicks) * i;
+    const y = yScale(v);
+    ctx.fillText(fmtTokens(Math.round(v)), pad.left - 8, y + 4);
+    if (i > 0) {
+      ctx.strokeStyle = '#30363d44';
+      ctx.beginPath();
+      ctx.moveTo(pad.left, y);
+      ctx.lineTo(pad.left + plotW, y);
+      ctx.stroke();
+    }
+  }
+
+  // X-axis labels
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#8b949e';
+  const step = Math.max(1, Math.floor(n / 10));
+  for (let i = 0; i < n; i += step) {
+    ctx.fillText('T' + turns[i].api_call, xScale(i), pad.top + plotH + 20);
+  }
+  if (n > 1) {
+    ctx.fillText('T' + turns[n - 1].api_call, xScale(n - 1), pad.top + plotH + 20);
+  }
+
+  // Click handler for turn drill-down
+  canvas.onclick = function(e) {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    let closest = 0;
+    let minDist = Infinity;
+    for (let i = 0; i < n; i++) {
+      const d = Math.abs(xScale(i) - mx);
+      if (d < minDist) { minDist = d; closest = i; }
+    }
+    showPayloadDetail(turns[closest]);
+  };
+
+  // Legend
+  const legendEl = $('#payload-legend');
+  legendEl.innerHTML = PAYLOAD_KEYS.map(k =>
+    `<span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:2px;background:${PAYLOAD_COLORS[k]}"></span>${PAYLOAD_LABELS[k]}</span>`
+  ).join('') + '<span style="display:flex;align-items:center;gap:4px"><span style="width:16px;border-top:2px dashed #ffffff88"></span>Cached</span>';
+}
+
+function drawPayloadBars(data) {
+  const container = $('#payload-bar-detail');
+  const maxTotal = Math.max(...data.map(d => {
+    const b = d.breakdown || {};
+    return PAYLOAD_KEYS.reduce((s, k) => s + (b[k] || 0), 0);
+  }), 1);
+
+  container.innerHTML = data.map((d, idx) => {
+    const b = d.breakdown || {};
+    const total = PAYLOAD_KEYS.reduce((s, k) => s + (b[k] || 0), 0);
+    const segments = PAYLOAD_KEYS.map(k => {
+      const v = b[k] || 0;
+      const pct = total > 0 ? (v / total * 100) : 0;
+      const widthPct = total > 0 ? (v / maxTotal * 100) : 0;
+      return pct > 3
+        ? `<div class="bar-segment" style="width:${widthPct}%;background:${PAYLOAD_COLORS[k]}" title="${PAYLOAD_LABELS[k]}: ${fmtNum(v)}">${fmtTokens(v)}</div>`
+        : (pct > 0 ? `<div class="bar-segment" style="width:${widthPct}%;background:${PAYLOAD_COLORS[k]}" title="${PAYLOAD_LABELS[k]}: ${fmtNum(v)}"></div>` : '');
+    }).join('');
+    const tools = (d.tools || []).join(', ');
+    return `
+      <div class="payload-bar-row" onclick="showPayloadDetail(payloadData[${idx}])" title="${tools ? 'Tools: ' + tools : ''}">
+        <div class="bar-label">T${d.api_call}</div>
+        <div class="bar-track">${segments}</div>
+        <div class="bar-value">${fmtTokens(total)}</div>
+      </div>`;
+  }).join('');
+
+  // Store data for click handler
+  window.payloadData = data;
+}
+
+function showPayloadDetail(turn) {
+  const wrap = $('#payload-bar-wrap');
+  wrap.style.display = '';
+  $('#payload-bar-title').textContent = `— Turn ${turn.api_call}` +
+    (turn.tools?.length ? ` (${turn.tools.join(', ')})` : '');
+
+  const b = turn.breakdown || {};
+  const total = PAYLOAD_KEYS.reduce((s, k) => s + (b[k] || 0), 0);
+  const cached = turn.cached_tokens || 0;
+  const actual = turn.prompt_tokens || 0;
+
+  let html = '<div class="stacked-detail">';
+
+  // Per-component bars
+  for (const k of PAYLOAD_KEYS) {
+    const v = b[k] || 0;
+    const pct = total > 0 ? (v / total * 100) : 0;
+    html += `
+      <div class="seg-row">
+        <div class="seg-color" style="background:${PAYLOAD_COLORS[k]}"></div>
+        <div class="seg-label">${PAYLOAD_LABELS[k]}</div>
+        <div class="seg-bar" style="background:${PAYLOAD_COLORS[k]}33"><div style="height:100%;width:${pct}%;background:${PAYLOAD_COLORS[k]};border-radius:3px"></div></div>
+        <div class="seg-value">${fmtNum(v)}</div>
+        <div class="seg-pct">${pct.toFixed(1)}%</div>
+      </div>`;
+  }
+
+  // Summary row
+  html += `
+    <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);font-size:12px;display:flex;gap:24px;color:var(--text-dim)">
+      <span>Estimated: <strong style="color:var(--text)">${fmtNum(total)}</strong></span>
+      <span>Actual prompt: <strong style="color:var(--text)">${fmtNum(actual)}</strong></span>
+      <span>Cached: <strong style="color:var(--text)">${fmtNum(cached)}</strong>${actual > 0 ? ` (${(cached/actual*100).toFixed(0)}%)` : ''}</span>
+    </div>`;
+
+  html += '</div>';
+
+  // Replace the bar detail area or append below it
+  const existing = wrap.querySelector('.stacked-detail');
+  if (existing) existing.remove();
+  wrap.insertAdjacentHTML('beforeend', html);
 }
 
 // ═══════════════════════════════════════════════════════════════════

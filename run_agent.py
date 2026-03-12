@@ -2437,6 +2437,85 @@ class AIAgent:
 
         return api_kwargs
 
+    def _compute_payload_breakdown(self, api_kwargs: dict) -> dict:
+        """Count tokens per payload component using tiktoken.
+
+        Returns a dict like {"system": N, "tool_defs": N, "user": N,
+        "assistant": N, "tool_results": N} where each value is the
+        token count for that component of the outgoing API payload.
+        """
+        try:
+            import tiktoken
+        except ImportError:
+            return {}
+
+        try:
+            enc = tiktoken.encoding_for_model("gpt-4o")
+        except Exception:
+            enc = tiktoken.get_encoding("cl100k_base")
+
+        def _count(obj):
+            if obj is None:
+                return 0
+            if isinstance(obj, str):
+                return len(enc.encode(obj))
+            return len(enc.encode(json.dumps(obj, default=str)))
+
+        breakdown = {}
+
+        if self.api_mode == "codex_responses":
+            # Codex Responses: instructions, input, tools
+            breakdown["system"] = _count(api_kwargs.get("instructions"))
+            breakdown["tool_defs"] = _count(api_kwargs.get("tools"))
+            # input is already serialized messages list
+            user_tokens = 0
+            assistant_tokens = 0
+            tool_results_tokens = 0
+            for item in (api_kwargs.get("input") or []):
+                if isinstance(item, dict):
+                    role = item.get("role", "")
+                elif isinstance(item, str):
+                    user_tokens += _count(item)
+                    continue
+                else:
+                    role = getattr(item, "role", "")
+                if role == "user":
+                    user_tokens += _count(item)
+                elif role == "assistant":
+                    assistant_tokens += _count(item)
+                elif role in ("tool", "function"):
+                    tool_results_tokens += _count(item)
+                else:
+                    user_tokens += _count(item)
+            breakdown["user"] = user_tokens
+            breakdown["assistant"] = assistant_tokens
+            breakdown["tool_results"] = tool_results_tokens
+        else:
+            # Chat Completions: messages (with system first), tools
+            breakdown["tool_defs"] = _count(api_kwargs.get("tools"))
+            system_tokens = 0
+            user_tokens = 0
+            assistant_tokens = 0
+            tool_results_tokens = 0
+            for msg in (api_kwargs.get("messages") or []):
+                role = msg.get("role", "") if isinstance(msg, dict) else getattr(msg, "role", "")
+                if role == "system":
+                    system_tokens += _count(msg)
+                elif role == "user":
+                    user_tokens += _count(msg)
+                elif role == "assistant":
+                    assistant_tokens += _count(msg)
+                elif role == "tool":
+                    tool_results_tokens += _count(msg)
+                else:
+                    user_tokens += _count(msg)
+            breakdown["system"] = system_tokens
+            breakdown["user"] = user_tokens
+            breakdown["assistant"] = assistant_tokens
+            breakdown["tool_results"] = tool_results_tokens
+
+        return breakdown
+
     def _build_assistant_message(self, assistant_message, finish_reason: str) -> dict:
         """Build a normalized assistant message dict from an API response message.
 
@@ -3561,6 +3640,12 @@ class AIAgent:
                     if self.api_mode == "codex_responses":
                         api_kwargs = self._preflight_codex_api_kwargs(api_kwargs, allow_stream=False)
 
+                    # Compute per-component token breakdown for payload viz
+                    try:
+                        self._last_payload_breakdown = self._compute_payload_breakdown(api_kwargs)
+                    except Exception:
+                        self._last_payload_breakdown = {}
+
                     if os.getenv("HERMES_DUMP_REQUESTS", "").strip().lower() in {"1", "true", "yes", "on"}:
                         self._dump_api_request_debug(api_kwargs, reason="preflight")
 
@@ -3860,6 +3945,8 @@ class AIAgent:
                             }
                             if _tool_names:
                                 _entry["tools"] = _tool_names
+                            if getattr(self, '_last_payload_breakdown', None):
+                                _entry["breakdown"] = self._last_payload_breakdown
                             _usage_line = _json.dumps(_entry)
                             with open(_hermes_home / "token_usage.jsonl", "a") as _tf:
                                 _tf.write(_usage_line + "\n")

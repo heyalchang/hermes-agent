@@ -112,6 +112,13 @@ async def handle_memory(request):
     return json_response(data.get_memory())
 
 
+async def handle_payload_breakdown(request):
+    session_id = request.query.get("session_id", "")
+    if not session_id:
+        return json_response({"error": "session_id required"}, status=400)
+    return json_response(data.get_payload_breakdown(session_id))
+
+
 async def handle_insights(request):
     days = int(request.query.get("days", 30))
     source = request.query.get("source")
@@ -143,6 +150,7 @@ def create_app() -> web.Application:
     app.router.add_get("/api/activity", handle_activity)
     app.router.add_get("/api/memory", handle_memory)
     app.router.add_get("/api/insights", handle_insights)
+    app.router.add_get("/api/payload-breakdown", handle_payload_breakdown)
 
     # Static files
     app.router.add_static("/static/", STATIC_DIR, name="static")

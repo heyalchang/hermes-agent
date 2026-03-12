@@ -222,6 +222,45 @@ def get_usage(days: int = 30, source: Optional[str] = None) -> Dict[str, Any]:
     return result
 
 
+def get_payload_breakdown(session_id: str) -> List[Dict[str, Any]]:
+    """Get per-turn payload breakdown for a session from the JSONL token log.
+
+    Returns entries that have a 'breakdown' field, ordered by api_call number.
+    Entries without breakdown (older data) are skipped.
+    """
+    if not JSONL_PATH.exists():
+        return []
+    results = []
+    try:
+        with open(JSONL_PATH, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if entry.get("session_id") != session_id:
+                    continue
+                if "breakdown" not in entry:
+                    continue
+                results.append({
+                    "api_call": entry.get("api_call", 0),
+                    "prompt_tokens": entry.get("prompt_tokens", 0),
+                    "completion_tokens": entry.get("completion_tokens", 0),
+                    "cached_tokens": entry.get("cached_tokens", 0),
+                    "cache_write_tokens": entry.get("cache_write_tokens", 0),
+                    "breakdown": entry["breakdown"],
+                    "tools": entry.get("tools", []),
+                    "model": entry.get("model", ""),
+                })
+    except Exception:
+        return []
+    results.sort(key=lambda x: x["api_call"])
+    return results
+
+
 def get_insights(days: int = 30, source: Optional[str] = None) -> Dict[str, Any]:
     """Generate insights report using InsightsEngine."""
     if not DB_PATH.exists():

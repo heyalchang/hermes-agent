@@ -1,5 +1,38 @@
 # Development Journal
 
+## 2026-03-12: Payload Visualization Feature
+
+### Goal
+Visualize what goes into each API payload: system prompt, tool definitions, user messages, assistant messages, tool results. Show actual cached tokens. Display as stacked bar (per-turn detail) and area chart (session growth over turns).
+
+### Changes
+
+**`run_agent.py` — instrumentation:**
+- `_compute_payload_breakdown(api_kwargs)` — uses tiktoken (`gpt-4o` encoding) to count tokens per component. Handles both Codex Responses and Chat Completions API modes. ~3ms overhead.
+- Breakdown computed after `_build_api_kwargs()` + preflight at main loop only (not memory flush or compression side tasks).
+- `breakdown` dict merged into JSONL entry: `{"system": N, "tool_defs": N, "user": N, "assistant": N, "tool_results": N}`
+
+**`dashboard/data.py` — endpoint:**
+- `get_payload_breakdown(session_id)` — reads JSONL, filters by session, returns turns with breakdown. Old entries without breakdown gracefully skipped.
+
+**`dashboard/server.py` — route:**
+- `GET /api/payload-breakdown?session_id=<id>`
+
+**`dashboard/static/index.html` — visualization:**
+- New "Payload" tab with session selector
+- Canvas area chart: stacked token layers (system blue, tool_defs purple, user green, assistant orange, tool_results red) with dashed cached-tokens overlay line
+- Horizontal stacked bars: per-turn proportions, click any turn for detailed breakdown
+- Per-turn drill-down: component bars with token counts, percentages, actual vs estimated vs cached
+- Version display (v0.2.0) added to topbar
+
+### Design decisions
+- tiktoken for exact counts (not the rough estimator in `model_metadata.py`)
+- Extend existing JSONL rather than new file or DB table (old entries without breakdown handled gracefully)
+- Instrument only main agent loop, not side tasks (memory flush, compression)
+- `message_extras` extension table planned for reasoning content (avoids upstream schema conflicts on merge)
+
+---
+
 ## 2026-03-09: OpenAI Codex Caching Improvements
 
 ### Problem
