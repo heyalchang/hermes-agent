@@ -11,6 +11,7 @@ Modular wizard with independently-runnable sections:
 Config files are stored in ~/.hermes/ for easy access.
 """
 
+import importlib.util
 import logging
 import os
 import sys
@@ -618,7 +619,6 @@ def setup_model_provider(config: dict):
         keep_label = None  # No provider configured — don't show "Keep current"
 
     provider_choices = [
-        "Nous Portal API key (direct API key access)",
         "Login with Nous Portal (Nous Research subscription — OAuth)",
         "Login with OpenAI Codex",
         "OpenRouter API key (100+ models, pay-per-use)",
@@ -632,7 +632,7 @@ def setup_model_provider(config: dict):
         provider_choices.append(keep_label)
 
     # Default to "Keep current" if a provider exists, otherwise OpenRouter (most common)
-    default_provider = len(provider_choices) - 1 if has_any_provider else 3
+    default_provider = len(provider_choices) - 1 if has_any_provider else 2
 
     if not has_any_provider:
         print_warning("An inference provider is required for Hermes to work.")
@@ -648,42 +648,7 @@ def setup_model_provider(config: dict):
     )
     nous_models = []  # populated if Nous login succeeds
 
-    if provider_idx == 0:  # Nous Portal API Key (direct)
-        selected_provider = "nous-api"
-        print()
-        print_header("Nous Portal API Key")
-        print_info("Use a Nous Portal API key for direct access to Nous inference.")
-        print_info("Get your API key at: https://portal.nousresearch.com")
-        print()
-
-        existing_key = get_env_value("NOUS_API_KEY")
-        if existing_key:
-            print_info(f"Current: {existing_key[:8]}... (configured)")
-            if prompt_yes_no("Update Nous API key?", False):
-                api_key = prompt("  Nous API key", password=True)
-                if api_key:
-                    save_env_value("NOUS_API_KEY", api_key)
-                    print_success("Nous API key updated")
-        else:
-            api_key = prompt("  Nous API key", password=True)
-            if api_key:
-                save_env_value("NOUS_API_KEY", api_key)
-                print_success("Nous API key saved")
-            else:
-                print_warning("Skipped - agent won't work without an API key")
-
-        # Clear custom endpoint vars if switching
-        if existing_custom:
-            save_env_value("OPENAI_BASE_URL", "")
-            save_env_value("OPENAI_API_KEY", "")
-        _update_config_for_provider(
-            "nous-api", "https://inference-api.nousresearch.com/v1"
-        )
-        _set_model_provider(
-            config, "nous-api", "https://inference-api.nousresearch.com/v1"
-        )
-
-    elif provider_idx == 1:  # Nous Portal
+    if provider_idx == 0:  # Nous Portal (OAuth)
         selected_provider = "nous"
         print()
         print_header("Nous Portal Login")
@@ -731,7 +696,7 @@ def setup_model_provider(config: dict):
             print_info("You can try again later with: hermes model")
             selected_provider = None
 
-    elif provider_idx == 2:  # OpenAI Codex
+    elif provider_idx == 1:  # OpenAI Codex
         selected_provider = "openai-codex"
         print()
         print_header("OpenAI Codex Login")
@@ -757,7 +722,7 @@ def setup_model_provider(config: dict):
             print_info("You can try again later with: hermes model")
             selected_provider = None
 
-    elif provider_idx == 3:  # OpenRouter
+    elif provider_idx == 2:  # OpenRouter
         selected_provider = "openrouter"
         print()
         print_header("OpenRouter API Key")
@@ -812,7 +777,7 @@ def setup_model_provider(config: dict):
         except Exception as e:
             logger.debug("Could not save provider to config.yaml: %s", e)
 
-    elif provider_idx == 4:  # Custom endpoint
+    elif provider_idx == 3:  # Custom endpoint
         selected_provider = "custom"
         print()
         print_header("Custom OpenAI-Compatible Endpoint")
@@ -844,7 +809,6 @@ def setup_model_provider(config: dict):
             save_env_value("OPENAI_API_KEY", api_key)
         if model_name:
             _set_default_model(config, model_name)
-            save_env_value("LLM_MODEL", model_name)
 
         try:
             from hermes_cli.auth import deactivate_provider
@@ -882,7 +846,7 @@ def setup_model_provider(config: dict):
 
         print_success("Custom endpoint configured")
 
-    elif provider_idx == 5:  # Z.AI / GLM
+    elif provider_idx == 4:  # Z.AI / GLM
         selected_provider = "zai"
         print()
         print_header("Z.AI / GLM API Key")
@@ -942,7 +906,7 @@ def setup_model_provider(config: dict):
         _update_config_for_provider("zai", zai_base_url)
         _set_model_provider(config, "zai", zai_base_url)
 
-    elif provider_idx == 6:  # Kimi / Moonshot
+    elif provider_idx == 5:  # Kimi / Moonshot
         selected_provider = "kimi-coding"
         print()
         print_header("Kimi / Moonshot API Key")
@@ -975,7 +939,7 @@ def setup_model_provider(config: dict):
         _update_config_for_provider("kimi-coding", pconfig.inference_base_url)
         _set_model_provider(config, "kimi-coding", pconfig.inference_base_url)
 
-    elif provider_idx == 7:  # MiniMax
+    elif provider_idx == 6:  # MiniMax
         selected_provider = "minimax"
         print()
         print_header("MiniMax API Key")
@@ -1008,7 +972,7 @@ def setup_model_provider(config: dict):
         _update_config_for_provider("minimax", pconfig.inference_base_url)
         _set_model_provider(config, "minimax", pconfig.inference_base_url)
 
-    elif provider_idx == 8:  # MiniMax China
+    elif provider_idx == 7:  # MiniMax China
         selected_provider = "minimax-cn"
         print()
         print_header("MiniMax China API Key")
@@ -1041,14 +1005,13 @@ def setup_model_provider(config: dict):
         _update_config_for_provider("minimax-cn", pconfig.inference_base_url)
         _set_model_provider(config, "minimax-cn", pconfig.inference_base_url)
 
-    # else: provider_idx == 9 (Keep current) — only shown when a provider already exists
+    # else: provider_idx == 8 (Keep current) — only shown when a provider already exists
 
     # ── OpenRouter API Key for tools (if not already set) ──
     # Tools (vision, web, MoA) use OpenRouter independently of the main provider.
     # Prompt for OpenRouter key if not set and a non-OpenRouter provider was chosen.
     if selected_provider in (
         "nous",
-        "nous-api",
         "openai-codex",
         "custom",
         "zai",
@@ -1121,15 +1084,6 @@ def setup_model_provider(config: dict):
             custom = prompt(f"  Model name (Enter to keep '{current_model}')")
             if custom:
                 _set_default_model(config, custom)
-                save_env_value("LLM_MODEL", custom)
-        elif selected_provider == "nous-api":
-            # Nous API key provider — prompt for model manually
-            print_info("Enter a model name available on Nous inference API.")
-            print_info("Examples: anthropic/claude-opus-4.6, deepseek/deepseek-r1")
-            custom = prompt(f"  Model name (Enter to keep '{current_model}')")
-            if custom:
-                _set_default_model(config, custom)
-                save_env_value("LLM_MODEL", custom)
         elif selected_provider == "openai-codex":
             from hermes_cli.codex_models import get_codex_model_ids
 
@@ -1146,12 +1100,10 @@ def setup_model_provider(config: dict):
             )
             if model_idx < len(codex_models):
                 _set_default_model(config, codex_models[model_idx])
-                save_env_value("LLM_MODEL", codex_models[model_idx])
             elif model_idx == len(codex_models):
                 custom = prompt("Enter model name")
                 if custom:
                     _set_default_model(config, custom)
-                    save_env_value("LLM_MODEL", custom)
             _update_config_for_provider("openai-codex", DEFAULT_CODEX_BASE_URL)
             _set_model_provider(config, "openai-codex", DEFAULT_CODEX_BASE_URL)
         elif selected_provider == "zai":
@@ -1172,12 +1124,10 @@ def setup_model_provider(config: dict):
 
             if model_idx < len(zai_models):
                 _set_default_model(config, zai_models[model_idx])
-                save_env_value("LLM_MODEL", zai_models[model_idx])
             elif model_idx == len(zai_models):
                 custom = prompt("Enter model name")
                 if custom:
                     _set_default_model(config, custom)
-                    save_env_value("LLM_MODEL", custom)
             # else: keep current
         elif selected_provider == "kimi-coding":
             kimi_models = ["kimi-k2.5", "kimi-k2-thinking", "kimi-k2-turbo-preview"]
@@ -1190,12 +1140,10 @@ def setup_model_provider(config: dict):
 
             if model_idx < len(kimi_models):
                 _set_default_model(config, kimi_models[model_idx])
-                save_env_value("LLM_MODEL", kimi_models[model_idx])
             elif model_idx == len(kimi_models):
                 custom = prompt("Enter model name")
                 if custom:
                     _set_default_model(config, custom)
-                    save_env_value("LLM_MODEL", custom)
             # else: keep current
         elif selected_provider in ("minimax", "minimax-cn"):
             minimax_models = ["MiniMax-M2.5", "MiniMax-M2.5-highspeed", "MiniMax-M2.1"]
@@ -1208,12 +1156,10 @@ def setup_model_provider(config: dict):
 
             if model_idx < len(minimax_models):
                 _set_default_model(config, minimax_models[model_idx])
-                save_env_value("LLM_MODEL", minimax_models[model_idx])
             elif model_idx == len(minimax_models):
                 custom = prompt("Enter model name")
                 if custom:
                     _set_default_model(config, custom)
-                    save_env_value("LLM_MODEL", custom)
             # else: keep current
         else:
             # Static list for OpenRouter / fallback (from canonical list)
@@ -1230,12 +1176,10 @@ def setup_model_provider(config: dict):
 
             if model_idx < len(ids):
                 _set_default_model(config, ids[model_idx])
-                save_env_value("LLM_MODEL", ids[model_idx])
             elif model_idx == len(ids):  # Custom
                 custom = prompt("Enter model name (e.g., anthropic/claude-opus-4.6)")
                 if custom:
                     _set_default_model(config, custom)
-                    save_env_value("LLM_MODEL", custom)
             # else: Keep current
 
         _final_model = config.get("model", "")
@@ -2077,6 +2021,114 @@ def setup_tools(config: dict, first_install: bool = False):
 
 
 # =============================================================================
+# OpenClaw Migration
+# =============================================================================
+
+
+_OPENCLAW_SCRIPT = (
+    PROJECT_ROOT
+    / "optional-skills"
+    / "migration"
+    / "openclaw-migration"
+    / "scripts"
+    / "openclaw_to_hermes.py"
+)
+
+
+def _offer_openclaw_migration(hermes_home: Path) -> bool:
+    """Detect ~/.openclaw and offer to migrate during first-time setup.
+
+    Returns True if migration ran successfully, False otherwise.
+    """
+    openclaw_dir = Path.home() / ".openclaw"
+    if not openclaw_dir.is_dir():
+        return False
+
+    if not _OPENCLAW_SCRIPT.exists():
+        return False
+
+    print()
+    print_header("OpenClaw Installation Detected")
+    print_info(f"Found OpenClaw data at {openclaw_dir}")
+    print_info("Hermes can import your settings, memories, skills, and API keys.")
+    print()
+
+    if not prompt_yes_no("Would you like to import from OpenClaw?", default=True):
+        print_info(
+            "Skipping migration. You can run it later via the openclaw-migration skill."
+        )
+        return False
+
+    # Ensure config.yaml exists before migration tries to read it
+    config_path = get_config_path()
+    if not config_path.exists():
+        save_config(load_config())
+
+    # Dynamically load the migration script
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "openclaw_to_hermes", _OPENCLAW_SCRIPT
+        )
+        if spec is None or spec.loader is None:
+            print_warning("Could not load migration script.")
+            return False
+
+        mod = importlib.util.module_from_spec(spec)
+        # Register in sys.modules so @dataclass can resolve the module
+        # (Python 3.11+ requires this for dynamically loaded modules)
+        import sys as _sys
+        _sys.modules[spec.name] = mod
+        try:
+            spec.loader.exec_module(mod)
+        except Exception:
+            _sys.modules.pop(spec.name, None)
+            raise
+
+        # Run migration with the "full" preset, execute mode, no overwrite
+        selected = mod.resolve_selected_options(None, None, preset="full")
+        migrator = mod.Migrator(
+            source_root=openclaw_dir.resolve(),
+            target_root=hermes_home.resolve(),
+            execute=True,
+            workspace_target=None,
+            overwrite=False,
+            migrate_secrets=True,
+            output_dir=None,
+            selected_options=selected,
+            preset_name="full",
+        )
+        report = migrator.migrate()
+    except Exception as e:
+        print_warning(f"Migration failed: {e}")
+        logger.debug("OpenClaw migration error", exc_info=True)
+        return False
+
+    # Print summary
+    summary = report.get("summary", {})
+    migrated = summary.get("migrated", 0)
+    skipped = summary.get("skipped", 0)
+    conflicts = summary.get("conflict", 0)
+    errors = summary.get("error", 0)
+
+    print()
+    if migrated:
+        print_success(f"Imported {migrated} item(s) from OpenClaw.")
+    if conflicts:
+        print_info(f"Skipped {conflicts} item(s) that already exist in Hermes.")
+    if skipped:
+        print_info(f"Skipped {skipped} item(s) (not found or unchanged).")
+    if errors:
+        print_warning(f"{errors} item(s) had errors — check the migration report.")
+
+    output_dir = report.get("output_dir")
+    if output_dir:
+        print_info(f"Full report saved to: {output_dir}")
+
+    print_success("Migration complete! Continuing with setup...")
+    return True
+
+
+# =============================================================================
 # Main Wizard Orchestrator
 # =============================================================================
 
@@ -2241,6 +2293,11 @@ def run_setup_wizard(args):
         except (KeyboardInterrupt, EOFError):
             print()
             return
+
+        # Offer OpenClaw migration before configuration begins
+        if _offer_openclaw_migration(hermes_home):
+            # Reload config in case migration wrote to it
+            config = load_config()
 
     # ── Full Setup — run all sections ──
     print_header("Configuration Location")
