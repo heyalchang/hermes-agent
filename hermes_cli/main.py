@@ -39,6 +39,8 @@ Usage:
     hermes uninstall           Uninstall Hermes Agent
     hermes acp                 Run as an ACP server for editor integration
     hermes sessions browse     Interactive session picker with search
+    hermes dashboard           # Start read-only web dashboard
+    hermes dashboard --port 8080  # Custom port
 
     hermes claw migrate --dry-run  # Preview migration without changes
 """
@@ -4014,6 +4016,28 @@ For more help on a command:
             print(f"Error generating insights: {e}")
 
     insights_parser.set_defaults(func=cmd_insights)
+
+    # =========================================================================
+    # dashboard command
+    # =========================================================================
+    dashboard_parser = subparsers.add_parser(
+        "dashboard",
+        help="Start read-only web dashboard",
+        description="Launch a web UI for monitoring sessions, messages, cron jobs, and usage"
+    )
+    dashboard_parser.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
+    dashboard_parser.add_argument("--port", type=int, default=18808, help="Port to listen on (default: 18808)")
+
+    def cmd_dashboard(args):
+        try:
+            from dashboard.server import run_server
+            run_server(host=args.host, port=args.port)
+        except ImportError:
+            print("Dashboard requires aiohttp: pip install hermes-agent[dashboard]")
+        except Exception as e:
+            print(f"Dashboard error: {e}")
+
+    dashboard_parser.set_defaults(func=cmd_dashboard)
 
     # =========================================================================
     # claw command (OpenClaw migration)
